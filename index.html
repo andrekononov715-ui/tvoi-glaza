@@ -94,6 +94,7 @@
 
   var W = 0, H = 0, dpr = 1, cx = 0, ey = 0, r = 60, size = 40;
   var stars = [], fibres = [], letters = [], bubbles = [], ripples = [];
+  var glow = [], shoots = [], hs = 1, hcy = 0, nextShoot = 1.5;
   var t = calm ? 30 : 0, last = 0, running = false;
 
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -107,7 +108,21 @@
     canvas.height = Math.round(H * dpr);
     cx = W / 2;
     ey = H * 0.41;
-    r = Math.max(30, Math.min((W - 40) / 4.2, H * 0.13));
+    r = Math.max(30, Math.min((W - 20) / 5.2, H * 0.11));
+
+    // светящиеся огоньки: сначала плавают, потом собираются в сердце вокруг глаза
+    hs = r / 6.4;
+    hcy = ey + 4.5 * hs;
+    glow = [];
+    for (var gi = 0; gi < 150; gi++) {
+      var ga = gi / 150 * 6.283, gs = Math.sin(ga);
+      glow.push({
+        tx: cx + 16 * gs * gs * gs * hs,
+        ty: hcy - (13 * Math.cos(ga) - 5 * Math.cos(2 * ga) - 2 * Math.cos(3 * ga) - Math.cos(4 * ga) + 2.5) * hs,
+        fx: Math.random() * W, fy: Math.random() * H,
+        ph: Math.random() * 6.28, r: 1 + Math.random() * 1.6
+      });
+    }
 
     stars = [];
     for (var i = 0; i < 60; i++) {
@@ -137,8 +152,15 @@
     }
   }
 
+  function heartPath(x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 0.9);
+    ctx.bezierCurveTo(x - s * 1.6, y - s * 0.2, x - s * 0.7, y - s * 1.3, x, y - s * 0.45);
+    ctx.bezierCurveTo(x + s * 0.7, y - s * 1.3, x + s * 1.6, y - s * 0.2, x, y + s * 0.9);
+  }
+
   function addBubble(x, y, big) {
-    bubbles.push({ x: x, y: y, r: (big ? 2 : 1) + Math.random() * (big ? 5 : 3.5), vy: 30 + Math.random() * 60, ph: Math.random() * 6.28 });
+    bubbles.push({ heart: big, x: x, y: y, r: (big ? 2 : 1) + Math.random() * (big ? 5 : 3.5), vy: 30 + Math.random() * 60, ph: Math.random() * 6.28 });
   }
 
   function drawEye(alpha) {
@@ -237,6 +259,36 @@
     }
     ctx.globalAlpha = 1;
 
+    // месяц
+    var mx = W * 0.84, my = H * 0.2, mr = Math.max(10, Math.min(W, H) * 0.035);
+    var mg = ctx.createRadialGradient(mx, my, 0, mx, my, mr * 5);
+    mg.addColorStop(0, 'rgba(217,251,255,0.22)');
+    mg.addColorStop(1, 'rgba(217,251,255,0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(mx - mr * 5, my - mr * 5, mr * 10, mr * 10);
+    ctx.fillStyle = '#eefcff';
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#04101f';
+    ctx.beginPath(); ctx.arc(mx + mr * 0.45, my - mr * 0.2, mr * 0.9, 0, 6.283); ctx.fill();
+
+    // падающие звёзды, пока вода не поднялась
+    if (!calm && t > nextShoot && t < RISE_FROM + RISE_TIME - 1.5) {
+      shoots.push({ x: W * (0.3 + Math.random() * 0.75), y: H * (0.04 + Math.random() * 0.26), life: 0 });
+      nextShoot = t + 1.1 + Math.random() * 1.4;
+    }
+    ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+    for (var sh = shoots.length - 1; sh >= 0; sh--) {
+      var so = shoots[sh];
+      so.life += dt;
+      if (so.life > 0.75) { shoots.splice(sh, 1); continue; }
+      so.x -= 520 * dt; so.y += 235 * dt;
+      var tail = ctx.createLinearGradient(so.x, so.y, so.x + 80, so.y - 36);
+      tail.addColorStop(0, 'rgba(238,252,255,' + (0.9 * Math.sin(Math.PI * so.life / 0.75)).toFixed(3) + ')');
+      tail.addColorStop(1, 'rgba(238,252,255,0)');
+      ctx.strokeStyle = tail;
+      ctx.beginPath(); ctx.moveTo(so.x, so.y); ctx.lineTo(so.x + 80, so.y - 36); ctx.stroke();
+    }
+
     // мягкое свечение вокруг глаза
     var halo = ctx.createRadialGradient(cx, ey, 0, cx, ey, r * 4.2);
     halo.addColorStop(0, 'rgba(40,160,200,0.22)');
@@ -288,6 +340,28 @@
       ctx.globalCompositeOperation = 'source-over';
     }
 
+    // огоньки: плавают под водой, потом складываются в сердце
+    if (e > 0.5) {
+      var gth = clamp01((t - 14.5) / 4.5);
+      gth = gth * gth * (3 - 2 * gth);
+      var beat = 1 + 0.035 * Math.sin(t * 2.4) * gth;
+      var cr = Math.round(95 + 160 * gth), cg = Math.round(214 - 74 * gth), cb = Math.round(232 - 47 * gth);
+      ctx.globalCompositeOperation = 'lighter';
+      for (var gp = 0; gp < glow.length; gp++) {
+        var P = glow[gp];
+        var fx = P.fx + Math.sin(t * 0.3 + P.ph) * 30, fy = P.fy + Math.cos(t * 0.25 + P.ph) * 24;
+        var hx = cx + (P.tx - cx) * beat, hy = hcy + (P.ty - hcy) * beat;
+        var px = fx + (hx - fx) * gth + Math.sin(t * 1.7 + P.ph) * 2;
+        var py = fy + (hy - fy) * gth + Math.cos(t * 1.4 + P.ph) * 2;
+        var pa = (e - 0.5) * 2 * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 2 + P.ph * 3)));
+        ctx.fillStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + (pa * 0.16).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(px, py, P.r * 3.4, 0, 6.283); ctx.fill();
+        ctx.fillStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + pa.toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(px, py, P.r * (1 + gth * 0.4), 0, 6.283); ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
     // пузырьки
     if (!calm && t > 6 && Math.random() < dt * 3) addBubble(Math.random() * W, H + 10, false);
     ctx.lineWidth = 1;
@@ -296,9 +370,16 @@
       bb.y -= bb.vy * dt;
       bb.x += Math.sin(t * 2.2 + bb.ph) * 14 * dt;
       if (bb.y < Math.max(level, -12)) { bubbles.splice(b, 1); continue; }
-      ctx.strokeStyle = 'rgba(217,251,255,0.55)';
-      ctx.fillStyle = 'rgba(95,214,232,0.10)';
-      ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, 6.283); ctx.fill(); ctx.stroke();
+      if (bb.heart) {
+        ctx.strokeStyle = 'rgba(255,175,208,0.85)';
+        ctx.fillStyle = 'rgba(255,140,185,0.2)';
+        heartPath(bb.x, bb.y, bb.r * 1.5);
+      } else {
+        ctx.strokeStyle = 'rgba(217,251,255,0.55)';
+        ctx.fillStyle = 'rgba(95,214,232,0.10)';
+        ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, 6.283);
+      }
+      ctx.fill(); ctx.stroke();
     }
 
     // круги от касания
@@ -313,7 +394,7 @@
 
     // «я в них утопаю»: буквы опускаются на глубину
     if (t > SINK_FROM) {
-      var fromY = H * 0.3, restY = Math.min(H * 0.77, H - 90);
+      var fromY = H * 0.3, restY = Math.min(H * 0.84, H - 76);
       ctx.font = '400 ' + size + 'px ' + HAND;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = '#d9fbff';
